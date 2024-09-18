@@ -73,14 +73,14 @@ function TokenSelector({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-[150px] h-[56px] justify-between text-base uppercase bg-[#0E1116] border-[#0E1116]"
+          className="w-max gap-2 h-[56px] justify-between text-base uppercase bg-[#0E1116] border-[#0E1116] p-0 hover:bg-[#0E1116] hover:text-white"
         >
           {selectedCurrencyKey ? (
             <>
               <Image
                 src={currencies[selectedCurrencyKey].icon}
                 alt={currencies[selectedCurrencyKey].name}
-                className="h-8 w-8"
+                className="h-8 w-8 "
                 key={currencies[selectedCurrencyKey].symbol}
               />
               {currencies[selectedCurrencyKey].symbol}
@@ -88,7 +88,7 @@ function TokenSelector({
           ) : (
             <p className="text-[14px] lowercase capitalize">Select Token</p>
           )}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[150px] p-0  border-[#1C1C1C] rounded-xl">

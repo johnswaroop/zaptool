@@ -317,16 +317,17 @@ export default function Home() {
     <main
       style={{
         background: "url('/bg.png')",
+        backgroundPosition: "center",
+        backgroundSize: "cover",
       }}
       className={`flex min-h-screen flex-col items-center justify-center  ${inter.className} bg-cover bg-top`}
     >
-      {/* <Nav /> */}
+      <Nav />
 
-      <div className="flex flex-col h-fit w-[528px] bg-[#262D39] p-4 border-[0.5px]  border-[#ffffff29] rounded-[36px]">
-        <div className="flex flex-col text-white bg-[#0E1116] p-3 rounded-3xl">
-
+      <div className="flex flex-col h-fit w-[604px] bg-[#262D39] p-3 border-[0.5px]  border-[#ffffff29] rounded-[36px]">
+        <div className="flex flex-col text-white bg-[#0E1116] p-4 rounded-3xl ">
           <span className="flex w-full justify-between">
-            <h1 className="text-[14px]">Select deposit asset</h1>
+            <h1 className="text-[18px] ">Select deposit asset</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
               <BiSolidWalletAlt className="text-[#ffffff64]" />
               <h1 className="text-[12px] text-[#ffffff64]">
@@ -350,7 +351,7 @@ export default function Home() {
             </span>
           </span>
 
-          <span className="w-full bg-[#000000a2] h-[88px] mt-4 rounde-[8px] p-4">
+          <span className="flex w-full bg-[#0E1116] h-[60px] mt-4 rounde-[8px] p-4 justify-between items-center">
             <TokenSelector
               currencies={currencies}
               setAsset={setDepositAsset}
@@ -359,14 +360,14 @@ export default function Home() {
             <input
               type="number"
               value={depositAmount}
+              className="bg-transparent text-white text-right text-4xl w-[250px]"
               onChange={(e) => handleAmountChange(e.target.value, 0)}
             />
-
           </span>
         </div>
-        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-3 rounded-3xl">
+        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-4 rounded-3xl">
           <span className="flex w-full justify-between">
-            <h1 className="text-[14px]">Select yield strategy</h1>
+            <h1 className="text-[18px]">Select yield strategy</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
               <h1 className="text-[12px] text-[#ffffff64]">
                 Current balance : {positionBalance.toFixed(6)}
@@ -374,18 +375,17 @@ export default function Home() {
             </span>
           </span>
 
-          <span className="w-full bg-[#000000a2] h-[88px] mt-4 rounde-[8px]">
+          <span className="w-full h-[60px] mt-4 rounde-[8px] items-center flex">
             <StrategySelector
               setYieldToken={setYieldToken}
               yieldTokens={yieldTokens}
               key="yield-strategy-selector"
             />
-
           </span>
         </div>
-        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-3 rounded-3xl">
+        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-4 rounded-3xl">
           <span className="flex w-full justify-between">
-            <h1 className="text-[14px]">Select loan asset</h1>
+            <h1 className="text-[18px]">Select loan asset</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
               <h1 className="text-[12px] text-[#ffffff64]">
                 Borrowable Limit:{" "}
@@ -408,7 +408,7 @@ export default function Home() {
               </span>
             </span>
           </span>
-          <span className="w-full bg-[#000000a2] h-[88px] mt-4 rounde-[8px] p-4">
+          <span className="w-full  h-[60px] mt-4 rounde-[8px] p-4 flex items-center justify-between">
             <TokenSelector
               currencies={currencies}
               setAsset={setLoanAsset}
@@ -417,13 +417,14 @@ export default function Home() {
             <input
               type="number"
               value={loanAmount}
+              className="bg-transparent text-white text-right text-4xl w-[250px]"
               onChange={(e) => handleAmountChange(e.target.value, 1)}
             />
           </span>
         </div>
 
         <Button
-          className="text-[#FFC390] bg-[#000000] mt-4 h-[64px]"
+          className="text-[#FFC390] ] mt-4 h-[64px] rounded-[40px] bg-[#111721] text-[#70789E]"
           disabled={shouldDisable}
           onClick={handleDeposit}
         >
