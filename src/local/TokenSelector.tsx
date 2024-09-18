@@ -65,7 +65,7 @@ function TokenSelector() {
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-[150px] h-[56px] justify-between bg-[#1C1C1C] border-[#2c2c2c] text-base uppercase"
+          className="w-[150px] h-[56px] justify-between text-base uppercase bg-[#0E1116] border-[#0E1116]"
         >
           {value ? (
             <>

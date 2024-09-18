@@ -7,19 +7,17 @@ const inter = Inter({ subsets: ["latin"] });
 import TokenSelector from "@/local/TokenSelector";
 import StrategySelector from "@/local/StrategySelector";
 
-import { useState } from "react";
-
 export default function Home() {
   return (
     <main
       style={{
         background: "url('/bg.png')",
       }}
-      className={`flex min-h-screen flex-col items-center justify-center  ${inter.className}`}
+      className={`flex min-h-screen flex-col items-center justify-center  ${inter.className} bg-cover bg-top`}
     >
-      <Nav />
-      <div className="flex flex-col h-fit w-[528px] bg-[#10100fc1] p-[32px] border-[0.5px]  border-[#ffffff29] rounded-xl">
-        <div className="flex flex-col text-white">
+      {/* <Nav /> */}
+      <div className="flex flex-col h-fit w-[528px] bg-[#262D39] p-4 border-[0.5px]  border-[#ffffff29] rounded-[36px]">
+        <div className="flex flex-col text-white bg-[#0E1116] p-3 rounded-3xl">
           <span className="flex w-full justify-between">
             <h1 className="text-[14px]">Select deposit asset</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
@@ -33,11 +31,11 @@ export default function Home() {
               </span>
             </span>
           </span>
-          <span className="w-full bg-[#000000a2] h-[88px] mt-4 rounde-[8px] p-4">
+          <span className="w-full mt-6">
             <TokenSelector />
           </span>
         </div>
-        <div className="flex flex-col text-white mt-6">
+        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-3 rounded-3xl">
           <span className="flex w-full justify-between">
             <h1 className="text-[14px]">Select yield strategy</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
@@ -46,11 +44,11 @@ export default function Home() {
               </h1>
             </span>
           </span>
-          <span className="w-full bg-[#000000a2] h-[88px] mt-4 rounde-[8px]">
+          <span className="w-full  h-[88px] mt-4 rounde-[8px]">
             <StrategySelector />
           </span>
         </div>
-        <div className="flex flex-col text-white mt-6">
+        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-3 rounded-3xl">
           <span className="flex w-full justify-between">
             <h1 className="text-[14px]">Select loan asset</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
@@ -69,7 +67,7 @@ export default function Home() {
             <TokenSelector />
           </span>
         </div>
-        <Button className="text-[#FFC390] bg-[#000000] mt-4 h-[64px]">
+        <Button className="font-medium bg-[#111721] mt-4 h-[64px] rounded-[40px] text-[14px] text-[#70789E]">
           Submit transaction
         </Button>
       </div>
