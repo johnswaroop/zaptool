@@ -318,11 +318,13 @@ export default function Home() {
       style={{
         background: "url('/bg.png')",
       }}
-      className={`flex min-h-screen flex-col items-center justify-center  ${inter.className}`}
+      className={`flex min-h-screen flex-col items-center justify-center  ${inter.className} bg-cover bg-top`}
     >
       {/* <Nav /> */}
-      <div className="flex flex-col h-fit w-[528px] bg-[#10100fc1] p-[32px] border-[0.5px]  border-[#ffffff29] rounded-xl">
-        <div className="flex flex-col text-white">
+
+      <div className="flex flex-col h-fit w-[528px] bg-[#262D39] p-4 border-[0.5px]  border-[#ffffff29] rounded-[36px]">
+        <div className="flex flex-col text-white bg-[#0E1116] p-3 rounded-3xl">
+
           <span className="flex w-full justify-between">
             <h1 className="text-[14px]">Select deposit asset</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
@@ -347,6 +349,7 @@ export default function Home() {
               </span>
             </span>
           </span>
+
           <span className="w-full bg-[#000000a2] h-[88px] mt-4 rounde-[8px] p-4">
             <TokenSelector
               currencies={currencies}
@@ -358,9 +361,10 @@ export default function Home() {
               value={depositAmount}
               onChange={(e) => handleAmountChange(e.target.value, 0)}
             />
+
           </span>
         </div>
-        <div className="flex flex-col text-white mt-6">
+        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-3 rounded-3xl">
           <span className="flex w-full justify-between">
             <h1 className="text-[14px]">Select yield strategy</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
@@ -369,15 +373,17 @@ export default function Home() {
               </h1>
             </span>
           </span>
+
           <span className="w-full bg-[#000000a2] h-[88px] mt-4 rounde-[8px]">
             <StrategySelector
               setYieldToken={setYieldToken}
               yieldTokens={yieldTokens}
               key="yield-strategy-selector"
             />
+
           </span>
         </div>
-        <div className="flex flex-col text-white mt-6">
+        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-3 rounded-3xl">
           <span className="flex w-full justify-between">
             <h1 className="text-[14px]">Select loan asset</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
@@ -415,6 +421,7 @@ export default function Home() {
             />
           </span>
         </div>
+
         <Button
           className="text-[#FFC390] bg-[#000000] mt-4 h-[64px]"
           disabled={shouldDisable}

@@ -34,7 +34,7 @@ export default function StrategySelector({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-full h-full justify-between bg-black border-black "
+          className="w-[200px] h-[40px] justify-between bg-[#1C2031] border-[#1C2031]"
         >
           {strategyIndex !== -1
             ? yieldTokens[strategyIndex]
@@ -42,7 +42,7 @@ export default function StrategySelector({
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[464px] p-0 bg-black border-black">
+      <PopoverContent className="w-[200px] p-0 bg-black border-black">
         <Command className="bg-[#10100F ">
           <CommandInput placeholder="Search strategy" />
           <CommandList>
