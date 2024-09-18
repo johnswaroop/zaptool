@@ -15,54 +15,17 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { useState } from "react";
+import { Dispatch, SetStateAction, useState } from "react";
 
-const frameworks = [
-  {
-    value: "liquidity_pool",
-    label: "Liquidity Pool",
-    description: "Provide liquidity to a pool and earn fees and/or rewards.",
-  },
-  {
-    value: "staking",
-    label: "Staking",
-    description:
-      "Lock your tokens in a network to support its operations and earn rewards.",
-  },
-  {
-    value: "yield_farming",
-    label: "Yield Farming",
-    description:
-      "Participate in various DeFi protocols to earn rewards in the form of additional tokens.",
-  },
-  {
-    value: "lending",
-    label: "Lending",
-    description: "Lend your assets on a platform and earn interest over time.",
-  },
-  {
-    value: "borrowing",
-    label: "Borrowing",
-    description:
-      "Borrow assets against collateral and earn yield by utilizing borrowed funds in other strategies.",
-  },
-  {
-    value: "auto_compounding",
-    label: "Auto-Compounding",
-    description:
-      "Automatically reinvest earnings from other yield strategies to maximize returns.",
-  },
-  {
-    value: "index_investing",
-    label: "Index Investing",
-    description:
-      "Invest in a diversified portfolio of tokens that track a specific index or strategy.",
-  },
-];
-
-export default function ComboboxDemo() {
+export default function StrategySelector({
+  setYieldToken,
+  yieldTokens,
+}: {
+  setYieldToken: Dispatch<SetStateAction<number>>;
+  yieldTokens: string[];
+}) {
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState("");
+  const [strategyIndex, setStrategyIndex] = useState(-1);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -73,8 +36,8 @@ export default function ComboboxDemo() {
           aria-expanded={open}
           className="w-[200px] h-[40px] justify-between bg-[#1C2031] border-[#1C2031]"
         >
-          {value
-            ? frameworks.find((framework) => framework.value === value)?.label
+          {strategyIndex !== -1
+            ? yieldTokens[strategyIndex]
             : "Select strategy"}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -83,24 +46,28 @@ export default function ComboboxDemo() {
         <Command className="bg-[#10100F ">
           <CommandInput placeholder="Search strategy" />
           <CommandList>
-            <CommandEmpty>No framework found.</CommandEmpty>
+            <CommandEmpty>No strategy found.</CommandEmpty>
             <CommandGroup className="text-white">
-              {frameworks.map((framework) => (
+              {yieldTokens.map((symbol, index) => (
                 <CommandItem
-                  key={framework.value}
-                  value={framework.value}
+                  key={index}
+                  value={index.toString()}
                   onSelect={(currentValue) => {
-                    setValue(currentValue === value ? "" : currentValue);
+                    const selectedIndex = parseInt(currentValue);
+                    setStrategyIndex(
+                      selectedIndex === strategyIndex ? -1 : selectedIndex
+                    );
+                    setYieldToken(selectedIndex);
                     setOpen(false);
                   }}
                 >
                   <Check
                     className={cn(
                       "mr-2 h-4 w-4",
-                      value === framework.value ? "opacity-100" : "opacity-0"
+                      strategyIndex === index ? "opacity-100" : "opacity-0"
                     )}
                   />
-                  {framework.label}
+                  {symbol}
                 </CommandItem>
               ))}
             </CommandGroup>

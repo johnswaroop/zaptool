@@ -1,5 +1,5 @@
 import { Check, ChevronsUpDown } from "lucide-react";
-import { useState } from "react";
+import { Dispatch, SetStateAction, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Currencies, Currency } from "@/utils";
+import Image from "next/image";
 
 const web3Tokens = [
   {
@@ -54,9 +56,15 @@ const web3Tokens = [
   },
 ];
 
-function TokenSelector() {
+function TokenSelector({
+  setAsset,
+  currencies,
+}: {
+  setAsset: Dispatch<SetStateAction<string>>;
+  currencies: Currencies;
+}) {
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState("usdc");
+  const [selectedCurrencyKey, setSelectedCurrencyKey] = useState<string>();
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -67,15 +75,15 @@ function TokenSelector() {
           aria-expanded={open}
           className="w-[150px] h-[56px] justify-between text-base uppercase bg-[#0E1116] border-[#0E1116]"
         >
-          {value ? (
+          {selectedCurrencyKey ? (
             <>
-              <img
-                src={web3Tokens.find((token) => token.value === value)?.icon}
-                alt=""
+              <Image
+                src={currencies[selectedCurrencyKey].icon}
+                alt={currencies[selectedCurrencyKey].name}
                 className="h-8 w-8"
-                key={web3Tokens.find((token) => token.value === value)?.icon}
+                key={currencies[selectedCurrencyKey].symbol}
               />
-              {web3Tokens.find((token) => token.value === value)?.value}
+              {currencies[selectedCurrencyKey].symbol}
             </>
           ) : (
             <p className="text-[14px] lowercase capitalize">Select Token</p>
@@ -87,25 +95,28 @@ function TokenSelector() {
         <Command className="bg-[#1C1C1C] text-white  ">
           <CommandInput placeholder="Search Token" />
           <CommandList>
-            <CommandEmpty>No framework found.</CommandEmpty>
+            <CommandEmpty>No Token found.</CommandEmpty>
             <CommandGroup>
-              {web3Tokens.map((token) => (
+              {Object.entries(currencies).map(([currencyKey, currency]) => (
                 <CommandItem
                   className="text-white "
-                  key={token.value}
-                  value={token.value}
+                  key={currencyKey}
+                  value={currencyKey}
                   onSelect={(currentValue) => {
-                    setValue(currentValue === value ? "" : currentValue);
+                    setSelectedCurrencyKey(currentValue);
+                    setAsset(currentValue);
                     setOpen(false);
                   }}
                 >
                   <Check
                     className={cn(
                       "mr-2 h-4 w-4",
-                      value === token.value ? "opacity-100" : "opacity-0"
+                      selectedCurrencyKey === currencyKey
+                        ? "opacity-100"
+                        : "opacity-0"
                     )}
                   />
-                  {token.label}
+                  {currency.name}
                 </CommandItem>
               ))}
             </CommandGroup>
