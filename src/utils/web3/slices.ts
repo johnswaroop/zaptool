@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react";
-import { BigNumber, Contract, constants, utils } from "ethers";
+import { BigNumber, Contract, constants, providers, utils } from "ethers";
 import type { Web3Provider } from "@ethersproject/providers";
 import { addresses, getAlchemistAddress } from "./addresses";
-import { currencies } from "./currencies";
+import { currencies, Currency } from "./currencies";
 import { availableChains, ChainIds } from "./chains";
 import alchemistAbi from "../abis/alchemist.json";
 import gatewayAbi from "../abis/gateway.json";
 import erc20Abi from "../abis/erc20.json";
+import { chainTokensMapping, Token } from "./tokenList";
+import { EnsoRouteResponse, fetchQoutesFromENSO } from "./enso";
+import { ProviderController } from "web3modal";
+import axios from "axios";
+import { fetchTokenPriceInUSD } from "./coingecko";
 
 export const useUnderlyingTokens = (
   chainId: ChainIds,
@@ -111,6 +116,7 @@ export const useYieldTokens = (chainId: ChainIds, provider: Web3Provider) => {
           `Not supporting alchemist eth in ${availableChains[chainId].chainName}`
         );
       }
+      console.log("finalData", finalData); // TODO: remove this
       setMapping(finalData);
     };
 
@@ -181,6 +187,21 @@ export const useAlchemixPosition = (
   return { ...position };
 };
 
+export const getTokenAllowance = async (
+  depositTokenAddress: string,
+  signerAddress: string,
+  alchemixAddress: string,
+  provider: Web3Provider
+) => {
+  // Calculate allowance for deposit token
+  const tokenContract = new Contract(depositTokenAddress, erc20Abi, provider);
+  const allowance = await tokenContract.allowance(
+    signerAddress,
+    alchemixAddress
+  );
+  return allowance;
+};
+
 export const useTokenInfo = (
   symbol: string,
   address: string,
@@ -212,12 +233,57 @@ export const useTokenInfo = (
           )
         );
       } catch (e) {
-        console.warn(`Error fetching token info, ${e}`);
+        console.warn(`Error fetching token info, ${e} ${symbol}`);
       }
     };
 
     if (symbol.length > 0 && address.length > 0 && !!provider) fetch();
   }, [address, chainId, provider, symbol, isPending]);
+
+  return { balance, allowance };
+};
+
+export const useSelectedTokenInfo = (
+  symbol: string,
+  address: string,
+  chainId: ChainIds,
+  provider: Web3Provider,
+  isPending: boolean,
+  ensoResponse: EnsoRouteResponse | null
+): { balance: BigNumber; allowance: BigNumber } => {
+  const [balance, setBalance] = useState(BigNumber.from(0));
+  const [allowance, setAllowance] = useState(BigNumber.from(0));
+
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        if (symbol === "ETH") {
+          setBalance(await provider.getBalance(address));
+          setAllowance(constants.MaxUint256);
+          return;
+        }
+        const token = new Contract(
+          symbol in currencies
+            ? currencies[symbol].addresses[chainId]
+            : chainTokensMapping[chainId][symbol].address,
+          erc20Abi,
+          provider
+        );
+        setBalance(await token["balanceOf"](address));
+
+        const allowToAddress = ensoResponse?.tx.to;
+        if (!allowToAddress) {
+          setAllowance(BigNumber.from(0));
+        } else {
+          setAllowance(await token["allowance"](address, allowToAddress));
+        }
+      } catch (e) {
+        console.warn(`Error fetching token info, ${e}`);
+      }
+    };
+
+    if (symbol.length > 0 && address.length > 0 && !!provider) fetch();
+  }, [address, chainId, provider, symbol, isPending, ensoResponse]);
 
   return { balance, allowance };
 };
@@ -303,31 +369,119 @@ export const getTokenNameAndSymbol = async (
   return `${await token["name"]()} (${await token["symbol"]()})`;
 };
 
-export const approveToken = async (
+export const approveTokenToEnso = async (
   symbol: string,
   amount: BigNumber,
   address: string,
-  provider: Web3Provider
+  provider: Web3Provider,
+  ensoResponse: EnsoRouteResponse
 ) => {
-  const alchemist = getAlchemistAddress(provider.network.chainId, symbol);
   const signer = provider.getSigner();
   const providerChainId = provider.network.chainId;
   if (!(providerChainId in ChainIds))
     throw new Error(
       `approveToken(ERROR): chainId ${provider.network.chainId} is not supported`
     );
-
   const chainId: ChainIds = providerChainId;
-  const tokenAddress = currencies[symbol].addresses[chainId];
+
+  const allowToAddress = ensoResponse.tx.to;
+  const tokenAddress =
+    symbol in currencies
+      ? currencies[symbol].addresses[chainId]
+      : chainTokensMapping[chainId][symbol].address;
   const token = new Contract(tokenAddress, erc20Abi, signer);
+
   if (symbol === "USDT") {
-    const allowance = await token["allowance"](address, alchemist);
+    const allowance = await token["allowance"](address, allowToAddress);
     if (!allowance.isZero()) {
-      const tx = await token["approve"](alchemist, BigNumber.from(0));
+      const tx = await token["approve"](allowToAddress, BigNumber.from(0));
       await tx.wait();
     }
   }
-  return token["approve"](alchemist, amount);
+
+  return token["approve"](allowToAddress, amount);
+};
+
+export const getBestCurrencyForDeposit = (
+  chainId: ChainIds,
+  inputToken: string,
+  inputTokenAmount: BigNumber,
+  provider: Web3Provider
+): Currency => {
+  // try {
+  //   // Mapping to store the amount of each output token
+  //   const currencyOutputMapping: Record<string, BigNumber> = {};
+
+  //   // Fetch quotes for each currency and populate currencyOutputMapping
+  //   const promises = Object.keys(currencies).map((key) =>
+  //     new Promise<void>(async (resolve, reject) => {
+  //       try {
+  //         const currency = currencies[key];
+  //         const outputTokenAddress = currency.addresses[chainId];
+  //         const fromAddress = await provider.getSigner().getAddress();
+  //         const quote = await fetchQoutesFromENSO(
+  //           chainId,
+  //           fromAddress,
+  //           inputToken,
+  //           outputTokenAddress,
+  //           inputTokenAmount
+  //         );
+  //         currencyOutputMapping[key] = BigNumber.from(quote.amountOut);
+  //         resolve();
+  //       } catch (error) {
+  //         reject(`Error fetching quote for currency ${key}: ${error}`);
+  //       }
+  //     })
+  //   );
+
+  //   // Wait for all promises to resolve
+  //   await Promise.all(promises);
+
+  //   // Mapping to store the USD value of each output token
+  //   const currencyOutputToUSDMapping: Record<string, BigNumber> = {};
+
+  //   // Fetch USD value for each output token
+  //   const usdPromises = Object.keys(currencyOutputMapping).map((key) =>
+  //     new Promise<void>(async (resolve, reject) => {
+  //       try {
+  //         const outputTokenAmount = currencyOutputMapping[key];
+  //         const outputTokenAddress = currencies[key].addresses[chainId];
+
+  //         // Call an API or function to get the USD value
+  //         const usdValue = await fetchTokenPriceInUSD(outputTokenAddress, outputTokenAmount);
+  //         currencyOutputToUSDMapping[key] = usdValue;
+  //         resolve();
+  //       } catch (error) {
+  //         reject(`Error fetching USD value for currency ${key}: ${error}`);
+  //       }
+  //     })
+  //   );
+
+  //   // Wait for all USD fetch promises to resolve
+  //   await Promise.all(usdPromises);
+
+  //   // Return both mappings
+  //   return {
+  //     currencyOutputMapping,
+  //     currencyOutputToUSDMapping,
+  //   };
+
+  // } catch (error) {
+  //   throw new Error(
+  //     `getBestTokenForDeposit(ERROR): error fetching best token for deposit, ${error}`
+  //   );
+  // }
+
+  return currencies["USDC"];
+};
+
+export const getBestCurrencyForLoan = (
+  chainId: ChainIds,
+  outputToken: string,
+  outputTokenAmount: BigNumber,
+  provider: Web3Provider
+): Currency => {
+  return currencies["USDT"];
 };
 
 export const depositUnderlying = (

@@ -1,32 +1,42 @@
 "use client";
-import Image from "next/image";
-import { Inter } from "next/font/google";
-import Nav from "@/local/Nav";
-import { BiSolidWalletAlt } from "react-icons/bi";
-import { Button } from "@/components/ui/button";
-const inter = Inter({ subsets: ["latin"] });
-import TokenSelector from "@/local/TokenSelector";
-import StrategySelector from "@/local/StrategySelector";
-import { utils } from "ethers";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import Nav from "@/local/Nav";
+import SelectedTokenSelector from "@/local/SelectedTokenSelector";
+import StrategySelector from "@/local/StrategySelector";
 import {
-  useWeb3Context,
-  useUnderlyingTokens,
-  useYieldTokens,
-  useAlchemixPosition,
-  useTokenInfo,
-  useMaximumMintableAmount,
-  currencies,
-  getTokenSymbol,
+  approveTokenToAlchemixContract,
+  approveTokenToEnso,
   ChainIds,
-  getTokenNameAndSymbol,
-  approveToken,
-  depositUnderlying,
+  currencies,
+  Currency,
   depositAndBorrow,
+  depositUnderlying,
+  getBestCurrencyForDeposit,
+  getBestCurrencyForLoan,
+  getTokenNameAndSymbol,
+  useAlchemixPosition,
+  useMaximumMintableAmount,
+  useSelectedTokenInfo,
+  useTokenInfo,
+  useWeb3Context,
+  useYieldTokens,
 } from "@/utils";
-import type { Web3Provider } from "@ethersproject/providers";
+import {
+  EnsoRouteResponse,
+  fetchRouteForSwap,
+  getTokenPriceInUSD,
+} from "@/utils/web3/enso";
+import { chainTokensMapping, Token, Tokens } from "@/utils/web3/tokenList";
+import { Web3Provider } from "@ethersproject/providers";
+import { sign } from "crypto";
+import { BigNumber, utils } from "ethers";
 import { LoaderCircle } from "lucide-react";
+import { Inter } from "next/font/google";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { BiSolidWalletAlt } from "react-icons/bi";
+
+const inter = Inter({ subsets: ["latin"] });
 
 export default function Home() {
   const { address, chainId, connected, connect, provider } =
@@ -37,19 +47,68 @@ export default function Home() {
       connect: any;
       provider: Web3Provider;
     };
-  const { tokens } = useUnderlyingTokens(chainId, provider);
+
   const { mapping } = useYieldTokens(chainId, provider);
 
-  const [isPending, setPending] = useState(false);
-  const [underlyingTokens, setUnderlyingTokens] = useState<string[]>([]);
+  // STATE HOOKS
+  const [inputToken, setInputToken] = useState<string>("");
+  const [inputTokenAmount, setInputTokenAmount] = useState<string>("0");
+
   const [depositAsset, setDepositAsset] = useState<string>("");
-  const [depositAmount, setDepositAmount] = useState<string>("");
+  const [depositAmount, setDepositAmount] = useState<string>("0");
+
   const [yieldTokens, setYieldTokens] = useState<string[]>([]);
   const [yieldToken, setYieldToken] = useState(-1);
-  const [showLoans, setShowLoans] = useState(true);
-  const [loanAssets, setLoanAssets] = useState<string[]>([]);
-  const [loanAsset, setLoanAsset] = useState("");
-  const [loanAmount, setLoanAmount] = useState("");
+
+  const [loanAsset, setLoanAsset] = useState<string>("");
+  const [loanAmount, setLoanAmount] = useState<string>("0");
+
+  const [outputToken, setOutputToken] = useState<string>("");
+  const [outputTokenAmount, setOutputTokenAmount] = useState<string>("0");
+  const [estimateOutputTokenAmount, setEstimateOutputTokenAmount] =
+    useState<string>("0");
+  const [maximumOutputTokenAmount, setMaximumOutputTokenAmount] =
+    useState<string>("0");
+
+  const [loanAssetToOutputTokenRatio, setLoanAssetToOutputTokenRatio] =
+    useState<number>(1);
+
+  const [ensoRouteForInputSwap, setEnsoRouteForInputSwap] =
+    useState<EnsoRouteResponse | null>(null);
+  const [ensoRouteForOutputSwap, setEnsoRouteForOutputSwap] =
+    useState<EnsoRouteResponse | null>(null);
+
+  const [showLoans, setShowLoans] = useState<boolean>(true); // NOTE: earlier we had a toggle button to switch between deposit and deposit & borrow, not added in this version
+  const [isPending, setPending] = useState<boolean>(false);
+
+  // CUSTOM HOOKS
+  const { balance: inputTokenBalance, allowance: inputTokenAllowance } =
+    useSelectedTokenInfo(
+      inputToken,
+      address,
+      chainId,
+      provider,
+      isPending,
+      ensoRouteForInputSwap
+    );
+
+  const { balance: loanAssetBalance, allowance: loanAssetAllowance } =
+    useSelectedTokenInfo(
+      loanAsset,
+      address,
+      chainId,
+      provider,
+      isPending,
+      ensoRouteForOutputSwap
+    );
+
+  const { balance: depositBalance, allowance: depositAllowance } = useTokenInfo(
+    depositAsset,
+    address,
+    chainId,
+    provider,
+    isPending
+  );
 
   const { balance: positionBalance } = useAlchemixPosition(
     depositAsset,
@@ -60,14 +119,8 @@ export default function Home() {
     provider,
     isPending
   );
-  const { balance: depositBalance, allowance: depositAllowance } = useTokenInfo(
-    depositAsset,
-    address,
-    chainId,
-    provider,
-    isPending
-  );
-  const { maximumAmount } = useMaximumMintableAmount(
+
+  const { maximumAmount: maximumMintableAmount } = useMaximumMintableAmount(
     depositAsset,
     depositAmount,
     address,
@@ -75,15 +128,56 @@ export default function Home() {
     provider
   );
 
+  // MEMO HOOKS
+  const inputTokenDecimals = useMemo(() => {
+    return inputToken && inputToken in currencies
+      ? currencies[inputToken === "ETH" ? "WETH" : inputToken]?.decimals || 18
+      : chainTokensMapping[chainId][inputToken]?.decimals || 18;
+  }, [inputToken]);
+
   const depositDecimals = useMemo(() => {
     return (
-      currencies[depositAsset === "ETH" ? "WETH" : depositAsset]?.decimals || 18
+      currencies[inputToken === "ETH" ? "WETH" : inputToken]?.decimals || 18
     );
   }, [depositAsset]);
 
-  const depositBalanceInsufficient = useMemo(
-    () => +depositAmount > +utils.formatUnits(depositBalance, depositDecimals),
-    [depositAmount, depositBalance, depositDecimals]
+  const loanDecimals = useMemo(() => {
+    return currencies[loanAsset]?.decimals || 18;
+  }, [loanAsset]);
+
+  const outputTokenDecimals = useMemo(() => {
+    return outputToken && outputToken in currencies
+      ? currencies[outputToken === "ETH" ? "WETH" : outputToken]?.decimals || 18
+      : chainTokensMapping[chainId][outputToken]?.decimals || 18;
+  }, [outputToken]);
+
+  const inputTokenIsALCXSupported = useMemo(() => {
+    return inputToken && inputToken in currencies;
+  }, [inputToken]);
+
+  const outputTokenSameAsLoanToken = useMemo(() => {
+    return outputToken === loanAsset;
+  }, [outputToken]);
+
+  const inputTokenBalanceInsufficient = useMemo(
+    () =>
+      +inputTokenAmount >
+      +utils.formatUnits(inputTokenBalance, inputTokenDecimals),
+    [inputTokenAmount, inputTokenBalance, inputTokenDecimals]
+  );
+
+  const inputTokenAllowanceInsufficient = useMemo(
+    () =>
+      inputTokenIsALCXSupported
+        ? false // skip inputTokenAllowanceInsufficient check, will be handled by depositAllowanceInsufficient
+        : +inputTokenAmount >
+          +utils.formatUnits(inputTokenAllowance, inputTokenDecimals),
+    [
+      inputTokenIsALCXSupported,
+      inputTokenAllowance,
+      inputTokenAmount,
+      inputTokenDecimals,
+    ]
   );
 
   const depositAllowanceInsufficient = useMemo(
@@ -92,43 +186,102 @@ export default function Home() {
     [depositAllowance, depositAmount, depositDecimals]
   );
 
-  const loanDecimals = useMemo(() => {
-    return currencies[loanAsset]?.decimals || 18;
-  }, [loanAsset]);
-
-  const loanAmountExceedsLimit = useMemo(
-    () => +loanAmount > +utils.formatUnits(maximumAmount, depositDecimals),
-    [depositDecimals, loanAmount, maximumAmount]
+  const loanAssetAllowanceInsufficient = useMemo(
+    () =>
+      outputTokenSameAsLoanToken
+        ? false
+        : +loanAmount > +utils.formatUnits(loanAssetAllowance, depositDecimals),
+    [
+      outputTokenSameAsLoanToken,
+      loanAssetAllowance,
+      loanAmount,
+      depositDecimals,
+    ]
   );
 
-  useEffect(() => {
-    setUnderlyingTokens([]);
-    setDepositAsset("");
-    setYieldTokens([]);
-    setYieldToken(-1);
-    setLoanAssets([]);
-    setLoanAsset("");
-  }, [chainId, provider]);
+  const loanAmountExceedsLimit = useMemo(
+    () =>
+      +loanAmount > +utils.formatUnits(maximumMintableAmount, depositDecimals),
+    [depositDecimals, loanAmount, maximumMintableAmount]
+  );
 
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const symbols = await Promise.all(
-          tokens.map((x) => getTokenSymbol(x, provider))
-        );
-        if (chainId !== ChainIds.Fantom) symbols.splice(0, 0, "ETH");
-        setUnderlyingTokens(symbols);
-      } catch (e) {
-        console.error(`Error fetching underlying token symbols, ${e}`);
-      }
-    };
+  // TODO: reconfigure this
+  const shouldDisable = useMemo(
+    () =>
+      isPending ||
+      (connected &&
+        (depositAsset.length === 0 ||
+          Number(depositAmount) === 0 ||
+          inputTokenBalanceInsufficient ||
+          (!depositAllowanceInsufficient &&
+            (yieldToken === -1 ||
+              (showLoans &&
+                (Number(loanAmount) === 0 ||
+                  loanAmountExceedsLimit ||
+                  loanAsset.length === 0)))))),
+    [
+      connected,
+      depositAllowanceInsufficient,
+      depositAmount,
+      depositAsset,
+      inputTokenBalanceInsufficient,
+      isPending,
+      loanAmount,
+      loanAmountExceedsLimit,
+      loanAsset,
+      showLoans,
+      yieldToken,
+    ]
+  );
 
-    if (tokens.length > 0) fetch();
-    else setDepositAsset("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokens]);
+  // HELPER FUNCTIONS
+  const getTokensForSelector = () => {
+    const tokens = chainTokensMapping[chainId];
+    const newTokens: Tokens = { ...tokens };
 
-  useEffect(() => setShowLoans(depositAsset !== "ETH"), [depositAsset]);
+    // add ALCX supported tokens
+    Object.keys(currencies).forEach((key) => {
+      const currency = currencies[key];
+      const token: Token = {
+        name: currency.name,
+        address: currency.addresses[chainId],
+        symbol: currency.symbol,
+        decimals: currency.decimals,
+        chainId: chainId,
+        logoURI: currency.icon.src,
+      };
+
+      newTokens[key] = token;
+    });
+
+    return newTokens;
+  };
+
+  const getTokenAmountForDecimals = (
+    amount: string,
+    asset: string,
+    chainId: ChainIds
+  ) => {
+    if (amount == "" || amount == "0") {
+      amount = "0";
+    }
+    if (+amount >= 1000000000) return;
+
+    let decimals = 18;
+    try {
+      decimals =
+        asset in currencies
+          ? currencies[asset].decimals
+          : chainTokensMapping[chainId][asset].decimals;
+    } catch (_) {
+      console.warn("Input token not selected yet");
+    }
+
+    const [integerPart, decimalPart] = amount.split(".");
+    return decimals && decimalPart?.length && decimalPart?.length > decimals
+      ? integerPart.trim() + "." + decimalPart.trim().substring(0, decimals)
+      : amount.trim();
+  };
 
   const fetchYieldTokens = useCallback(async () => {
     try {
@@ -143,120 +296,243 @@ export default function Home() {
       );
       setYieldTokens(tokens);
       if (tokens.length > 0) setYieldToken(0);
+      console.log("tokens:", tokens); // TODO: remove this
     } catch (e) {
       console.error(`Error fetching yield token symbols, ${e}`);
     }
   }, [chainId, depositAsset, mapping, provider]);
 
+  // EFFECT HOOKS
   useEffect(() => {
-    fetchYieldTokens();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapping]);
+    setDepositAsset("");
+    setDepositAmount("0");
+    setEnsoRouteForInputSwap(null);
+
+    const updateDepositValues = async () => {
+      // configuring best deposit asset
+      // if selected input token already supported by ALCX -> no change
+      // else find best token to swap to ALCX
+      let tempDepositAsset = inputToken;
+      let tempDepositAmount = inputTokenAmount;
+
+      if (inputToken && !(inputToken in currencies)) {
+        // TEST: amounts type here w/ ya w/o decimals
+
+        // find best token to swap to ALCX
+        const inputAmount = utils.parseUnits(
+          inputTokenAmount,
+          inputTokenDecimals
+        );
+        if (inputAmount.lte(0)) return; // to prevent querrying for 0 amount
+
+        let currency: Currency;
+        try {
+          currency = await getBestCurrencyForDeposit(
+            chainId,
+            inputToken,
+            inputAmount,
+            provider
+          );
+          tempDepositAsset = currency.symbol;
+        } catch (error) {
+          console.error(
+            `updateDepositValues(ERROR): unable to getBestCurrencyForDeposit error: ${error}`
+          );
+          return;
+        }
+
+        // for swapping we make use of enso api to get tx data
+        try {
+          const ensoRouteResponse = await fetchRouteForSwap(
+            chainId,
+            address,
+            inputAmount,
+            chainTokensMapping[chainId][inputToken].address,
+            currency.addresses[chainId]
+          );
+          tempDepositAmount = ensoRouteResponse.amountOut;
+          setEnsoRouteForInputSwap(ensoRouteResponse);
+        } catch (error) {
+          console.error(
+            `updateDepositValues(ERROR): unable to fetchRouteForSwap error: ${error}`
+          );
+          return;
+        }
+      }
+
+      // set as deposit asset & update deposit amount
+      setDepositAsset(tempDepositAsset);
+      setDepositAmount(tempDepositAmount);
+    };
+
+    updateDepositValues();
+  }, [inputToken, chainId, provider, inputTokenAmount]);
 
   useEffect(() => {
     setYieldTokens([]);
+    if (depositAsset) fetchYieldTokens();
     setYieldToken(-1);
-    setLoanAssets([]);
+
     setLoanAsset("");
-    fetchYieldTokens();
+    setLoanAmount("0");
+
     if (depositAsset.length > 0) {
       const assets = [];
-      // TODO: allow for next version
-      if (process.env.SUPPORT_ALSWAP) assets.push(depositAsset);
       if (chainId !== ChainIds.Fantom || !depositAsset.includes("ETH"))
         assets.push(`AL${depositAsset.includes("ETH") ? "ETH" : "USD"}`);
-      setLoanAssets(assets);
       if (assets.length > 0) setLoanAsset(assets[0]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depositAsset]);
 
+  // calculate ratio between loan asset and output token
   useEffect(() => {
-    const amountStr = getAmountForDecimals(depositAmount, depositAsset);
-    // if (!amountStr)
-    //   throw new Error(
-    //     `useEffect:setDepositAmount(ERROR): unable to getAmountForDecimals amount: ${depositAmount} asset: ${depositAsset}`
-    //   );
-    setDepositAmount(amountStr ?? "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depositAsset]);
+    const fetchPrices = async () => {
+      if (!loanAsset || !outputToken || !chainId) return;
+
+      if (loanAsset === outputToken) {
+        setLoanAssetToOutputTokenRatio(1); // Return 1 when both tokens are the same
+        return;
+      }
+
+      try {
+        const [loanAssetPrice, outputTokenPrice] = await Promise.all([
+          getTokenPriceInUSD(chainId, currencies[loanAsset].addresses[chainId]),
+          getTokenPriceInUSD(
+            chainId,
+            chainTokensMapping[chainId][outputToken].address
+          ),
+        ]);
+
+        console.log("loanAssetPrice:", loanAssetPrice);
+        console.log("outputTokenPrice:", outputTokenPrice);
+        console.log(
+          "loanAssetPrice / outputTokenPrice:",
+          loanAssetPrice / outputTokenPrice
+        );
+        // Calculate and set the ratio
+        setLoanAssetToOutputTokenRatio(loanAssetPrice / outputTokenPrice);
+        // setLoanAssetToOutputTokenRatio(1);
+      } catch (error) {
+        console.error("Error fetching token prices:", error);
+        setLoanAssetToOutputTokenRatio(1); // Handle the error case (or set to some default)
+      }
+    };
+
+    fetchPrices();
+  }, [loanAsset, outputToken, chainId, currencies, chainTokensMapping]);
+
+  // set loan amount as maximum mintable amount
+  useEffect(() => {
+    setLoanAmount(utils.formatUnits(maximumMintableAmount, depositDecimals));
+    console.log(
+      "maximumMintableAmount:",
+      loanAssetToOutputTokenRatio * +maximumMintableAmount
+    );
+    const maxOutputTokenAmount = (
+      loanAssetToOutputTokenRatio *
+      +utils.formatUnits(maximumMintableAmount, depositDecimals)
+    ).toFixed(outputTokenDecimals);
+    setMaximumOutputTokenAmount(maxOutputTokenAmount.toString());
+  }, [loanAssetToOutputTokenRatio, maximumMintableAmount]);
 
   useEffect(() => {
-    if (depositAsset.length > 0)
-      setLoanAmount(utils.formatUnits(maximumAmount, depositDecimals));
-  }, [depositAmount, depositAsset, maximumAmount]);
+    setOutputTokenAmount(maximumOutputTokenAmount);
+  }, [maximumOutputTokenAmount]);
 
-  const shouldDisable = useMemo(
-    () =>
-      isPending ||
-      (connected &&
-        (depositAsset.length === 0 ||
-          Number(depositAmount) === 0 ||
-          depositBalanceInsufficient ||
-          (!depositAllowanceInsufficient &&
-            (yieldToken === -1 ||
-              (showLoans &&
-                (Number(loanAmount) === 0 ||
-                  loanAmountExceedsLimit ||
-                  loanAsset.length === 0)))))),
-    [
-      connected,
-      depositAllowanceInsufficient,
-      depositAmount,
-      depositAsset,
-      depositBalanceInsufficient,
-      isPending,
-      loanAmount,
-      loanAmountExceedsLimit,
-      loanAsset,
-      showLoans,
-      yieldToken,
-    ]
-  );
-
-  const getAmountForDecimals = (amount: string, asset: string) => {
-    if (amount == "" || amount == "0") {
-      amount = "0";
+  // To update loan amount based on output token amount
+  useEffect(() => {
+    if (outputTokenSameAsLoanToken) {
+      setLoanAmount(outputTokenAmount);
+      return;
     }
-    if (+amount >= 1000000000) return;
+    if (outputTokenAmount === "0") return;
 
-    let decimals = 18;
-    try {
-      decimals = currencies[asset].decimals;
-    } catch (_) {
-      console.warn("Deposit asset not selected yet");
+    // calculate loan amount based on output token amount
+    // TODO: check logic of ratio
+    const tempLoanAmount = loanAssetToOutputTokenRatio * +outputTokenAmount;
+
+    if (!isNaN(tempLoanAmount) && !tempLoanAmount.toString().includes("e")) {
+      console.log("tempLoanAmount:", tempLoanAmount);
+      setLoanAmount(tempLoanAmount.toString());
     }
+  }, [outputToken, outputTokenAmount]);
 
-    const [integerPart, decimalPart] = amount.split(".");
-    return decimals && decimalPart?.length && decimalPart?.length > decimals
-      ? integerPart.trim() + "." + decimalPart.trim().substring(0, decimals)
-      : amount.trim();
+  // To fetch output token swap route
+  useEffect(() => {
+    if (outputTokenSameAsLoanToken) return;
+
+    setEnsoRouteForOutputSwap(null);
+
+    const fetch = async () => {
+      if (!depositAsset || !loanAsset || !chainId) return;
+      if (loanAmount === "0") return;
+
+      try {
+        const currency = currencies[loanAsset];
+
+        const amount = utils.parseUnits(loanAmount, loanDecimals);
+
+        const ensoRouteResponse = await fetchRouteForSwap(
+          chainId,
+          address,
+          amount,
+          currency.addresses[chainId],
+          chainTokensMapping[chainId][outputToken].address
+        );
+
+        const amountOut = ensoRouteResponse.amountOut;
+
+        setEstimateOutputTokenAmount(amountOut);
+        setEnsoRouteForOutputSwap(ensoRouteResponse);
+      } catch (error) {
+        console.error(
+          `fetch(ERROR): unable to fetchRouteForSwap error: ${error}`
+        );
+        return;
+      }
+    };
+
+    fetch();
+  }, [outputToken, loanAsset, loanAmount]);
+
+  // ONCHANGE HANDLERS
+  const setMaxInputAmount = () => {
+    setInputTokenAmount(
+      utils.formatUnits(inputTokenBalance, inputTokenDecimals)
+    );
   };
 
-  const handleAmountChange = (amount: string, index: number) => {
-    const amountStr = getAmountForDecimals(
+  const setHalfInputAmount = () => {
+    setInputTokenAmount(
+      utils.formatUnits(inputTokenBalance.div(2), inputTokenDecimals)
+    );
+  };
+
+  const setMaxBorrow = () => {
+    setLoanAmount(utils.formatUnits(maximumMintableAmount, loanDecimals));
+  };
+
+  const setHalfBorrow = () => {
+    setLoanAmount(
+      utils.formatUnits(maximumMintableAmount.div(2), loanDecimals)
+    );
+  };
+
+  const handleTokenAmountChange = (amount: string, index: number) => {
+    console.log("amount:", amount);
+    const amountStr = getTokenAmountForDecimals(
       amount,
-      [depositAsset, loanAsset][index]
+      [inputToken, outputToken][index],
+      chainId
     );
     if (!amountStr)
       throw new Error(
-        `handleAmountChange(ERROR): unable to getAmountForDecimals amount: ${amount} idx: ${index}`
+        `handleTokenAmountChange(ERROR): unable to getTokenAmountForDecimals amount: ${amount} idx: ${index}`
       );
     if (!isNaN(Number(amountStr)) && !amountStr.includes("e"))
-      [setDepositAmount, setLoanAmount][index](amountStr);
+      [setInputTokenAmount, setOutputTokenAmount][index](amountStr);
+    console.log("amountStr:", amountStr);
   };
-
-  const setMaxDeposit = () =>
-    setDepositAmount(utils.formatUnits(depositBalance, depositDecimals));
-
-  const setHalfDeposit = () =>
-    setDepositAmount(utils.formatUnits(depositBalance.div(2), depositDecimals));
-
-  const setMaxBorrow = () =>
-    setLoanAmount(utils.formatUnits(maximumAmount, depositDecimals));
-
-  const setHalfBorrow = () =>
-    setLoanAmount(utils.formatUnits(maximumAmount.div(2), depositDecimals));
 
   const handleDeposit = async () => {
     if (!connected) {
@@ -264,11 +540,52 @@ export default function Home() {
       return;
     }
 
+    // TEST:
+    if (!inputTokenIsALCXSupported && inputTokenAllowanceInsufficient) {
+      try {
+        setPending(true);
+
+        if (!ensoRouteForInputSwap) {
+          throw new Error("Input swap required before token transfer approval");
+        }
+
+        const tx = await approveTokenToEnso(
+          inputToken,
+          utils.parseUnits(inputTokenAmount, inputTokenDecimals),
+          address,
+          provider,
+          ensoRouteForInputSwap
+        );
+        await tx.wait();
+      } catch (e) {
+        console.error(`Approve failure, ${e}`);
+      } finally {
+        setPending(false);
+        return;
+        /**
+         * TODO:
+         * An idea to make the handle flow deposit,
+         * like currently it needs multiple entry in handleDeposit
+         * for vairous approvals
+         * and then finally 3 differen transefers and accepts
+         * what if we keep a success flag which will be used at end of each
+         * step, if success = true -> continue to next step without exiting handleDeposit
+         * if fails -> return from there and restart the handleDeposit flow
+         *
+         */
+      }
+    }
+
     const amount = utils.parseUnits(depositAmount, depositDecimals);
     if (depositAllowanceInsufficient) {
       try {
         setPending(true);
-        const tx = await approveToken(depositAsset, amount, address, provider);
+        const tx = await approveTokenToAlchemixContract(
+          depositAsset,
+          amount,
+          address,
+          provider
+        );
         await tx.wait();
       } catch (e) {
         console.error(`Approve failure, ${e}`);
@@ -278,6 +595,52 @@ export default function Home() {
       }
     }
 
+    if (!outputTokenSameAsLoanToken && loanAssetAllowanceInsufficient) {
+      try {
+        setPending(true);
+
+        if (!ensoRouteForOutputSwap) {
+          throw new Error(
+            "Output swap required before token transfer approval"
+          );
+        }
+
+        const tx = await approveTokenToEnso(
+          loanAsset,
+          utils.parseUnits(loanAmount, loanDecimals),
+          address,
+          provider,
+          ensoRouteForOutputSwap
+        );
+        await tx.wait();
+      } catch (e) {
+        console.error(`Approve failure, ${e}`);
+      } finally {
+        setPending(false);
+        return;
+      }
+    }
+
+    const signer = provider.getSigner();
+
+    // STEP-1: swap the input token to ALCX supported token if not
+    if (!inputTokenIsALCXSupported && ensoRouteForInputSwap) {
+      try {
+        setPending(true);
+        const inputSwapTx = await signer.sendTransaction(
+          ensoRouteForInputSwap.tx
+        );
+
+        await inputSwapTx.wait();
+        console.log("Input swap tx complete!");
+      } catch (e) {
+        console.error(`Input Swap failure, ${e}`);
+      } finally {
+        setPending(false);
+      }
+    }
+
+    // STEP-2: ALCX Contract Interaction
     try {
       setPending(true);
 
@@ -311,8 +674,26 @@ export default function Home() {
     } finally {
       setPending(false);
     }
+
+    // STEP-3: swap the loan token to output token if needed
+    if (!outputTokenSameAsLoanToken && ensoRouteForOutputSwap) {
+      try {
+        setPending(true);
+        const outputSwapTx = await signer.sendTransaction(
+          ensoRouteForOutputSwap.tx
+        );
+
+        await outputSwapTx.wait();
+        console.log("Output swap tx complete!");
+      } catch (e) {
+        console.error(`Output Swap failure, ${e}`);
+      } finally {
+        setPending(false);
+      }
+    }
   };
 
+  // COMPONENT RENDER
   return (
     <main
       style={{
@@ -327,24 +708,25 @@ export default function Home() {
       <div className="flex flex-col h-fit w-[604px] bg-[#262D39] p-3 border-[0.5px]  border-[#ffffff29] rounded-[36px]">
         <div className="flex flex-col text-white bg-[#0E1116] p-4 rounded-3xl ">
           <span className="flex w-full justify-between">
-            <h1 className="text-[18px] ">Select deposit asset</h1>
+            <h1 className="text-[18px] ">Select Deposit Asset</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
               <BiSolidWalletAlt className="text-[#ffffff64]" />
               <h1 className="text-[12px] text-[#ffffff64]">
-                {(+utils.formatUnits(depositBalance, depositDecimals)).toFixed(
-                  4
-                )}
+                {(+utils.formatUnits(
+                  inputTokenBalance,
+                  inputTokenDecimals
+                )).toFixed(4)}
                 &nbsp;
               </h1>
               <span
                 className="bg-[rgb(54,54,54)] p-2 py-1 rounded-2xl text-[10px]"
-                onClick={setMaxDeposit}
+                onClick={setMaxInputAmount}
               >
                 MAX
               </span>
               <span
                 className="bg-[#363636] p-2 py-1 rounded-2xl text-[10px]"
-                onClick={setHalfDeposit}
+                onClick={setHalfInputAmount}
               >
                 HALF
               </span>
@@ -352,46 +734,59 @@ export default function Home() {
           </span>
 
           <span className="flex w-full bg-[#0E1116] h-[60px] mt-4 rounde-[8px] p-4 justify-between items-center">
-            <TokenSelector
-              currencies={currencies}
-              setAsset={setDepositAsset}
-              key="deposit-asset-selector"
+            <SelectedTokenSelector
+              tokens={{
+                ...getTokensForSelector(),
+              }}
+              setSelectedToken={setInputToken}
+              key="selected-input-token-selector"
             />
             <input
               type="number"
-              value={depositAmount}
+              value={inputTokenAmount}
               className="bg-transparent text-white text-right text-4xl w-[250px]"
-              onChange={(e) => handleAmountChange(e.target.value, 0)}
+              onChange={(e) => handleTokenAmountChange(e.target.value, 0)}
+              min={1 / Math.pow(10, inputTokenDecimals)}
+              max={utils.formatUnits(inputTokenBalance, inputTokenDecimals)}
+              step={1 / Math.pow(10, inputTokenDecimals)}
             />
           </span>
         </div>
         <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-4 rounded-3xl">
           <span className="flex w-full justify-between">
-            <h1 className="text-[18px]">Select yield strategy</h1>
+            <h1 className="text-[18px]">Select Yield Strategy</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
               <h1 className="text-[12px] text-[#ffffff64]">
-                Current balance : {positionBalance.toFixed(6)}
+                Current Balance [{depositAsset} - {loanAsset}] :{" "}
+                {positionBalance.toFixed(6)}
               </h1>
             </span>
           </span>
 
           <span className="w-full h-[60px] mt-4 rounde-[8px] items-center flex">
-            <StrategySelector
-              setYieldToken={setYieldToken}
-              yieldTokens={yieldTokens}
-              key="yield-strategy-selector"
-            />
+            <div className="flex justify-between gap-2">
+              <StrategySelector
+                setYieldToken={setYieldToken}
+                yieldTokens={yieldTokens}
+                key="yield-strategy-selector"
+              />
+              <div className="flex flex-col gap-2">
+                <span>Loan Amount: {loanAmount}</span>
+                <span>Ratio: {loanAssetToOutputTokenRatio}</span>
+                <span>
+                  Max Mint:{" "}
+                  {utils.formatUnits(maximumMintableAmount, depositDecimals)}
+                </span>
+              </div>
+            </div>
           </span>
         </div>
         <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-4 rounded-3xl">
           <span className="flex w-full justify-between">
-            <h1 className="text-[18px]">Select loan asset</h1>
+            <h1 className="text-[18px]">Select Loan Asset</h1>
             <span className="flex items-center gap-2 text-[#D3D3D3]">
               <h1 className="text-[12px] text-[#ffffff64]">
-                Borrowable Limit:{" "}
-                {(+utils.formatUnits(maximumAmount, depositDecimals)).toFixed(
-                  4
-                )}
+                Borrowable Limit: {maximumOutputTokenAmount}
                 &nbsp;
               </h1>
               <span
@@ -409,18 +804,27 @@ export default function Home() {
             </span>
           </span>
           <span className="w-full  h-[60px] mt-4 rounde-[8px] p-4 flex items-center justify-between">
-            <TokenSelector
-              currencies={currencies}
-              setAsset={setLoanAsset}
-              key="loan-asset-selector"
+            <SelectedTokenSelector
+              tokens={{ ...getTokensForSelector() }}
+              setSelectedToken={setOutputToken}
+              key="selected-output-token-selector"
             />
             <input
               type="number"
-              value={loanAmount}
+              value={outputTokenAmount}
               className="bg-transparent text-white text-right text-4xl w-[250px]"
-              onChange={(e) => handleAmountChange(e.target.value, 1)}
+              onChange={(e) => handleTokenAmountChange(e.target.value, 1)}
+              min={1 / Math.pow(10, outputTokenDecimals)}
+              max={maximumOutputTokenAmount}
+              step={1 / Math.pow(10, outputTokenDecimals)}
             />
           </span>
+          {estimateOutputTokenAmount && (
+            <span className="text-muted-foreground">{`Est. Output: ~${utils.formatUnits(
+              estimateOutputTokenAmount,
+              outputTokenDecimals
+            )} ${outputToken}`}</span>
+          )}
         </div>
 
         <Button
@@ -431,12 +835,14 @@ export default function Home() {
           {isPending ? (
             <LoaderCircle size="1.75rem" className="animate-spin" />
           ) : connected ? (
-            depositBalanceInsufficient ? (
-              "Insufficient Balance"
+            inputTokenBalanceInsufficient ? (
+              `Insufficient ${inputToken} Balance`
             ) : depositAllowanceInsufficient ? (
               `Approve ${depositAsset}`
             ) : !showLoans ? (
               "Deposit"
+            ) : loanAssetAllowanceInsufficient ? (
+              `Approve ${loanAsset}`
             ) : loanAmountExceedsLimit ? (
               "Exceed Maximum Mintable Amount"
             ) : (
