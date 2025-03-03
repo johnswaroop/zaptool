@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import Nav from "@/local/Nav";
 import SelectedTokenSelector from "@/local/SelectedTokenSelector";
 import StrategySelector from "@/local/StrategySelector";
+
 import {
   approveTokenToAlchemixContract,
   approveTokenToEnso,
@@ -80,6 +81,15 @@ export default function Home() {
 
   const [showLoans, setShowLoans] = useState<boolean>(true); // NOTE: earlier we had a toggle button to switch between deposit and deposit & borrow, not added in this version
   const [isPending, setPending] = useState<boolean>(false);
+
+  const [isLoading, setisLoading] = useState(false);
+
+  console.log({
+    inputToken,
+    depositAsset,
+    loanAsset,
+    outputToken,
+  });
 
   // CUSTOM HOOKS
   const { balance: inputTokenBalance, allowance: inputTokenAllowance } =
@@ -388,9 +398,10 @@ export default function Home() {
   useEffect(() => {
     const fetchPrices = async () => {
       if (!loanAsset || !outputToken || !chainId) return;
-
+      setisLoading(true);
       if (loanAsset === outputToken) {
         setLoanAssetToOutputTokenRatio(1); // Return 1 when both tokens are the same
+        setisLoading(false);
         return;
       }
 
@@ -416,6 +427,7 @@ export default function Home() {
         console.error("Error fetching token prices:", error);
         setLoanAssetToOutputTokenRatio(1); // Handle the error case (or set to some default)
       }
+      setisLoading(false);
     };
 
     fetchPrices();
@@ -468,6 +480,7 @@ export default function Home() {
       if (loanAmount === "0") return;
 
       try {
+        setisLoading(true);
         const currency = currencies[loanAsset];
 
         const amount = utils.parseUnits(loanAmount, loanDecimals);
@@ -484,10 +497,12 @@ export default function Home() {
 
         setEstimateOutputTokenAmount(amountOut);
         setEnsoRouteForOutputSwap(ensoRouteResponse);
+        setisLoading(false);
       } catch (error) {
         console.error(
           `fetch(ERROR): unable to fetchRouteForSwap error: ${error}`
         );
+        setisLoading(false);
         return;
       }
     };
@@ -519,12 +534,14 @@ export default function Home() {
   };
 
   const handleTokenAmountChange = (amount: string, index: number) => {
+    setisLoading(true);
     console.log("amount:", amount);
     const amountStr = getTokenAmountForDecimals(
       amount,
       [inputToken, outputToken][index],
       chainId
     );
+    setisLoading(false);
     if (!amountStr)
       throw new Error(
         `handleTokenAmountChange(ERROR): unable to getTokenAmountForDecimals amount: ${amount} idx: ${index}`
@@ -693,6 +710,8 @@ export default function Home() {
     }
   };
 
+  console.log(isLoading);
+
   // COMPONENT RENDER
   return (
     <main
@@ -704,155 +723,240 @@ export default function Home() {
       className={`flex min-h-screen flex-col items-center justify-center  ${inter.className} bg-cover bg-top`}
     >
       <Nav />
-
-      <div className="flex flex-col h-fit w-[604px] bg-[#262D39] p-3 border-[0.5px]  border-[#ffffff29] rounded-[36px]">
-        <div className="flex flex-col text-white bg-[#0E1116] p-4 rounded-3xl ">
-          <span className="flex w-full justify-between">
-            <h1 className="text-[18px] ">Select Deposit Asset</h1>
-            <span className="flex items-center gap-2 text-[#D3D3D3]">
-              <BiSolidWalletAlt className="text-[#ffffff64]" />
-              <h1 className="text-[12px] text-[#ffffff64]">
-                {(+utils.formatUnits(
-                  inputTokenBalance,
-                  inputTokenDecimals
-                )).toFixed(4)}
-                &nbsp;
-              </h1>
-              <span
-                className="bg-[rgb(54,54,54)] p-2 py-1 rounded-2xl text-[10px]"
-                onClick={setMaxInputAmount}
-              >
-                MAX
-              </span>
-              <span
-                className="bg-[#363636] p-2 py-1 rounded-2xl text-[10px]"
-                onClick={setHalfInputAmount}
-              >
-                HALF
-              </span>
-            </span>
-          </span>
-
-          <span className="flex w-full bg-[#0E1116] h-[60px] mt-4 rounde-[8px] p-4 justify-between items-center">
-            <SelectedTokenSelector
-              tokens={{
-                ...getTokensForSelector(),
-              }}
-              setSelectedToken={setInputToken}
-              key="selected-input-token-selector"
-            />
-            <input
-              type="number"
-              value={inputTokenAmount}
-              className="bg-transparent text-white text-right text-4xl w-[250px]"
-              onChange={(e) => handleTokenAmountChange(e.target.value, 0)}
-              min={1 / Math.pow(10, inputTokenDecimals)}
-              max={utils.formatUnits(inputTokenBalance, inputTokenDecimals)}
-              step={1 / Math.pow(10, inputTokenDecimals)}
-            />
-          </span>
-        </div>
-        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-4 rounded-3xl">
-          <span className="flex w-full justify-between">
-            <h1 className="text-[18px]">Select Yield Strategy</h1>
-            <span className="flex items-center gap-2 text-[#D3D3D3]">
-              <h1 className="text-[12px] text-[#ffffff64]">
-                Current Balance [{depositAsset} - {loanAsset}] :{" "}
-                {positionBalance.toFixed(6)}
-              </h1>
-            </span>
-          </span>
-
-          <span className="w-full h-[60px] mt-4 rounde-[8px] items-center flex">
-            <div className="flex justify-between gap-2">
-              <StrategySelector
-                setYieldToken={setYieldToken}
-                yieldTokens={yieldTokens}
-                key="yield-strategy-selector"
-              />
-              <div className="flex flex-col gap-2">
-                <span>Loan Amount: {loanAmount}</span>
-                <span>Ratio: {loanAssetToOutputTokenRatio}</span>
-                <span>
-                  Max Mint:{" "}
-                  {utils.formatUnits(maximumMintableAmount, depositDecimals)}
+      <div className="flex gap-1">
+        <TokenPath
+          tokens={{
+            ...getTokensForSelector(),
+          }}
+          path={{
+            depositAsset,
+            inputToken,
+            loanAsset,
+            outputToken,
+          }}
+        />
+        <div className="flex flex-col h-fit w-[604px] bg-[#262D39] p-3 border-[0.5px]  border-[#ffffff29] rounded-[36px]">
+          <div className="flex flex-col text-white bg-[#0E1116] p-4 rounded-3xl ">
+            <span className="flex w-full justify-between">
+              <h1 className="text-[18px] ">Select Deposit Asset</h1>
+              <span className="flex items-center gap-2 text-[#D3D3D3]">
+                <BiSolidWalletAlt className="text-[#ffffff64]" />
+                <h1 className="text-[12px] text-[#ffffff64]">
+                  {(+utils.formatUnits(
+                    inputTokenBalance,
+                    inputTokenDecimals
+                  )).toFixed(4)}
+                  &nbsp;
+                </h1>
+                <span
+                  className="bg-[rgb(54,54,54)] p-2 py-1 rounded-2xl text-[10px]"
+                  onClick={setMaxInputAmount}
+                >
+                  MAX
                 </span>
-              </div>
-            </div>
-          </span>
-        </div>
-        <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-4 rounded-3xl">
-          <span className="flex w-full justify-between">
-            <h1 className="text-[18px]">Select Loan Asset</h1>
-            <span className="flex items-center gap-2 text-[#D3D3D3]">
-              <h1 className="text-[12px] text-[#ffffff64]">
-                Borrowable Limit: {maximumOutputTokenAmount}
-                &nbsp;
-              </h1>
-              <span
-                className="bg-[#363636] p-2 py-1 rounded-2xl text-[10px]"
-                onClick={setMaxBorrow}
-              >
-                MAX
-              </span>
-              <span
-                className="bg-[#363636] p-2 py-1 rounded-2xl text-[10px]"
-                onClick={setHalfBorrow}
-              >
-                HALF
+                <span
+                  className="bg-[#363636] p-2 py-1 rounded-2xl text-[10px]"
+                  onClick={setHalfInputAmount}
+                >
+                  HALF
+                </span>
               </span>
             </span>
-          </span>
-          <span className="w-full  h-[60px] mt-4 rounde-[8px] p-4 flex items-center justify-between">
-            <SelectedTokenSelector
-              tokens={{ ...getTokensForSelector() }}
-              setSelectedToken={setOutputToken}
-              key="selected-output-token-selector"
-            />
-            <input
-              type="number"
-              value={outputTokenAmount}
-              className="bg-transparent text-white text-right text-4xl w-[250px]"
-              onChange={(e) => handleTokenAmountChange(e.target.value, 1)}
-              min={1 / Math.pow(10, outputTokenDecimals)}
-              max={maximumOutputTokenAmount}
-              step={1 / Math.pow(10, outputTokenDecimals)}
-            />
-          </span>
-          {estimateOutputTokenAmount && (
-            <span className="text-muted-foreground">{`Est. Output: ~${utils.formatUnits(
-              estimateOutputTokenAmount,
-              outputTokenDecimals
-            )} ${outputToken}`}</span>
+
+            <span className="flex w-full bg-[#0E1116] h-[60px] mt-4 rounde-[8px] p-4 justify-between items-center">
+              <SelectedTokenSelector
+                tokens={{
+                  ...getTokensForSelector(),
+                }}
+                setSelectedToken={setInputToken}
+                key="selected-input-token-selector"
+              />
+              <input
+                type="number"
+                value={
+                  parseFloat(inputTokenAmount) < 1
+                    ? inputTokenAmount
+                    : inputTokenAmount.replace(/^0+(?!$)/, "")
+                }
+                className="bg-transparent text-white text-right text-4xl w-[250px] hover:outline-none active::outline-none active:border-none"
+                onChange={(e) => {
+                  const max = utils.formatUnits(
+                    inputTokenBalance,
+                    inputTokenDecimals
+                  );
+                  if (parseFloat(max) >= parseFloat(e.target.value)) {
+                    handleTokenAmountChange(e.target.value, 0);
+                  }
+                }}
+                min={1 / Math.pow(10, inputTokenDecimals)}
+                max={utils.formatUnits(inputTokenBalance, inputTokenDecimals)}
+                step={1 / Math.pow(10, inputTokenDecimals)}
+              />
+            </span>
+          </div>
+          <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-4 rounded-3xl">
+            <span className="flex w-full justify-between">
+              <h1 className="text-[18px]">Select Yield Strategy</h1>
+              <span className="flex items-center gap-2 text-[#D3D3D3]">
+                <h1 className="text-[12px] text-[#ffffff64]">
+                  Current Balance [{depositAsset} - {loanAsset}] :{" "}
+                  {positionBalance.toFixed(6)}
+                </h1>
+              </span>
+            </span>
+
+            <span className="w-full h-[60px] mt-4 rounde-[8px] items-center flex">
+              <div className="flex justify-between gap-2">
+                <StrategySelector
+                  setYieldToken={setYieldToken}
+                  yieldTokens={yieldTokens}
+                  key="yield-strategy-selector"
+                />
+              </div>
+            </span>
+          </div>
+          <div className="flex flex-col text-white mt-4 bg-[#0E1116] p-4 rounded-3xl">
+            <span className="flex w-full justify-between">
+              <h1 className="text-[18px]">Select Loan Asset</h1>
+              <span className="flex items-center gap-2 text-[#D3D3D3]">
+                <h1 className="text-[12px] text-[#ffffff64]">
+                  Borrowable Limit: {parseFloat(maximumOutputTokenAmount)}
+                  &nbsp;
+                </h1>
+                <span
+                  className="bg-[#363636] p-2 py-1 rounded-2xl text-[10px]"
+                  onClick={setMaxBorrow}
+                >
+                  MAX
+                </span>
+                <span
+                  className="bg-[#363636] p-2 py-1 rounded-2xl text-[10px]"
+                  onClick={setHalfBorrow}
+                >
+                  HALF
+                </span>
+              </span>
+            </span>
+            <span className="w-full  h-[60px] mt-4 rounde-[8px] p-4 flex items-center justify-between">
+              <SelectedTokenSelector
+                tokens={{ ...getTokensForSelector() }}
+                setSelectedToken={setOutputToken}
+                key="selected-output-token-selector"
+              />
+              <input
+                type="number"
+                value={
+                  parseFloat(outputTokenAmount) < 1
+                    ? outputTokenAmount
+                    : outputTokenAmount.replace(/^0+(?!$)/, "")
+                }
+                className="bg-transparent text-white text-right text-4xl w-[250px] hover:outline-none active::outline-none active:border-none"
+                onChange={(e) => {
+                  const max = parseFloat(maximumOutputTokenAmount);
+                  const value = parseFloat(e.target.value);
+                  if (max >= value) {
+                    handleTokenAmountChange(e.target.value, 1);
+                  }
+                }}
+                min={1 / Math.pow(10, outputTokenDecimals)}
+                max={maximumOutputTokenAmount}
+                step={1 / Math.pow(10, outputTokenDecimals)}
+              />
+            </span>
+            {estimateOutputTokenAmount && (
+              <span className="text-muted-foreground">{`Est. Output: ~${parseFloat(
+                utils.formatUnits(
+                  estimateOutputTokenAmount,
+                  outputTokenDecimals
+                )
+              )} ${outputToken}`}</span>
+            )}
+          </div>
+
+          {isLoading ? (
+            <Button
+              className="text-[#FFC390] mt-4 h-[64px] rounded-[40px] bg-[#111721] text-[#70789E]"
+              disabled={true}
+            >
+              <LoaderCircle size="1.75rem" className="animate-spin" />
+            </Button>
+          ) : (
+            <Button
+              className="text-[#FFC390] mt-4 h-[64px] rounded-[40px] bg-[#111721] text-[#70789E]"
+              style={shouldDisable ? { opacity: 0.5 } : { opacity: 1 }}
+              disabled={shouldDisable}
+              onClick={handleDeposit}
+            >
+              {isPending ? (
+                <LoaderCircle size="1.75rem" className="animate-spin" />
+              ) : connected ? (
+                inputTokenBalanceInsufficient ? (
+                  `Insufficient ${inputToken} Balance`
+                ) : depositAllowanceInsufficient ? (
+                  `Approve ${depositAsset}`
+                ) : !showLoans ? (
+                  "Deposit"
+                ) : loanAssetAllowanceInsufficient ? (
+                  `Approve ${loanAsset}`
+                ) : loanAmountExceedsLimit ? (
+                  "Exceed Maximum Mintable Amount"
+                ) : (
+                  "Deposit & Borrow"
+                )
+              ) : (
+                "Connect Wallet"
+              )}
+            </Button>
           )}
         </div>
-
-        <Button
-          className="text-[#FFC390] ] mt-4 h-[64px] rounded-[40px] bg-[#111721] text-[#70789E]"
-          disabled={shouldDisable}
-          onClick={handleDeposit}
-        >
-          {isPending ? (
-            <LoaderCircle size="1.75rem" className="animate-spin" />
-          ) : connected ? (
-            inputTokenBalanceInsufficient ? (
-              `Insufficient ${inputToken} Balance`
-            ) : depositAllowanceInsufficient ? (
-              `Approve ${depositAsset}`
-            ) : !showLoans ? (
-              "Deposit"
-            ) : loanAssetAllowanceInsufficient ? (
-              `Approve ${loanAsset}`
-            ) : loanAmountExceedsLimit ? (
-              "Exceed Maximum Mintable Amount"
-            ) : (
-              "Deposit & Borrow"
-            )
-          ) : (
-            "Connect Wallet"
-          )}
-        </Button>
       </div>
     </main>
   );
 }
+
+const TokenPath = ({
+  tokens,
+  path,
+}: {
+  tokens: Tokens;
+  path: {
+    inputToken: string;
+    depositAsset: string;
+    loanAsset: string;
+    outputToken: string;
+  };
+}) => {
+  const { inputToken, outputToken, loanAsset, depositAsset } = path;
+
+  const inRoute =
+    inputToken == depositAsset ? [inputToken] : [inputToken, depositAsset];
+  const outRoute =
+    loanAsset == outputToken ? [outputToken] : [loanAsset, outputToken];
+
+  if (!inputToken || !outputToken) {
+    return <></>;
+  }
+
+  return (
+    <div className="flex relative flex-col my-auto gap-8 mr-6 bg-[#262D39] p-3 border-[0.5px]  border-[#ffffff29] rounded-[26px]">
+      {/* path */}
+      <span className="absolute w-1 h-[90%] my-auto bg-[#0E1116] left-0 right-0 mx-auto"></span>
+      {[...inRoute, ...outRoute].map((tk) => {
+        if (!tk) {
+          return <></>;
+        }
+        return (
+          <span
+            key={"tk" + tk}
+            className="flex flex-col  gap-2 bg-[#0E1116] rounded-xl w-24 h-24 items-center justify-center z-10"
+          >
+            <img className="w-10" src={tokens[tk].logoURI} alt="" />
+            <h1 className="text-gray-300 text-sm w-full text-center">
+              {tokens[tk].symbol}
+            </h1>
+          </span>
+        );
+      })}
+    </div>
+  );
+};
