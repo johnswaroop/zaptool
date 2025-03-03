@@ -213,7 +213,7 @@ export default function Home() {
         (depositAsset.length === 0 ||
           Number(depositAmount) === 0 ||
           inputTokenBalanceInsufficient ||
-          (!depositAllowanceInsufficient &&
+          (depositAllowanceInsufficient &&
             (yieldToken === -1 ||
               (showLoans &&
                 (Number(loanAmount) === 0 ||

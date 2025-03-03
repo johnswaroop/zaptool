@@ -402,6 +402,32 @@ export const approveTokenToEnso = async (
   return token["approve"](allowToAddress, amount);
 };
 
+export const approveTokenToAlchemixContract = async (
+  depositAsset: string,
+  amount: BigNumber,
+  address: string,
+  provider: Web3Provider
+) => {
+  const signer = provider.getSigner();
+  const providerChainId = provider.network.chainId;
+  if (!(providerChainId in ChainIds))
+    throw new Error(
+      `approveToken(ERROR): chainId ${provider.network.chainId} is not supported`
+    );
+  const chainId: ChainIds = providerChainId;
+
+  const alchemistAddress = getAlchemistAddress(chainId, depositAsset);
+  if (!alchemistAddress)
+    throw new Error(
+      `approveToken(ERROR): Alchemist Address not found for chainId: ${chainId} depositAsset: ${depositAsset}`
+    );
+
+  const tokenAddress = currencies[depositAsset].addresses[chainId];
+  const token = new Contract(tokenAddress, erc20Abi, signer);
+
+  return token["approve"](alchemistAddress, amount);
+};
+
 export const getBestCurrencyForDeposit = (
   chainId: ChainIds,
   inputToken: string,
