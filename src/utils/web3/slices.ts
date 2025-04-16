@@ -339,9 +339,22 @@ export const useMaximumMintableAmount = (
         setMaximumAmount(
           userTotalDeposit
             .mul(utils.parseEther("1"))
-            .div(minimumCollateralization)
             .sub(account.debt)
+            .div(minimumCollateralization)
         );
+        console.log({
+          minimumCollateralization,
+          depositAmount,
+          userTotalDeposit,
+          account,
+          yieldTokenParameters,
+          positions,
+          maximumAmount: userTotalDeposit
+            .mul(utils.parseEther("1"))
+            .sub(account.debt)
+            .div(minimumCollateralization),
+          debt: account.debt,
+        });
       } catch (e) {
         console.warn(`Error fetching maximum mintable amount, ${e}`);
       }
@@ -426,6 +439,40 @@ export const approveTokenToAlchemixContract = async (
   const token = new Contract(tokenAddress, erc20Abi, signer);
 
   return token["approve"](alchemistAddress, amount);
+};
+
+export const approveToken = async (
+  token: string,
+  spender: string,
+  amount: BigNumber,
+  provider: Web3Provider
+) => {
+  const signer = provider.getSigner();
+
+  const providerChainId = provider.network.chainId;
+  if (!(providerChainId in ChainIds))
+    throw new Error(
+      `approveToken(ERROR): chainId ${provider.network.chainId} is not supported`
+    );
+  const chainId: ChainIds = providerChainId;
+
+  const tokenAddress =
+    token in currencies
+      ? currencies[token].addresses[chainId]
+      : chainTokensMapping[chainId][token].address;
+  const tokenContract = new Contract(tokenAddress, erc20Abi, signer);
+
+  const currentAllowance = await tokenContract.allowance(
+    await signer.getAddress(),
+    spender
+  );
+  if (currentAllowance.gte(amount)) {
+    console.log(`Sufficient allowance already set for ${spender}`);
+    return;
+  }
+
+  const tx = await tokenContract.approve(spender, amount);
+  return tx.wait();
 };
 
 export const getBestCurrencyForDeposit = (
@@ -544,14 +591,18 @@ export const depositUnderlying = (
         `depositUnderlying(ERROR): Alchemist Address not found for chainId: ${chainId} depositAsset: ${depositAsset}`
       );
 
-    return wethGateway["depositUnderlying"](
-      alchemistAddress,
-      yieldToken,
-      amount,
-      address,
-      0,
-      { value: amount }
-    );
+    const wethGatewayIface = new utils.Interface(gatewayAbi);
+
+    return {
+      to: gatewayAddress,
+      data: wethGatewayIface.encodeFunctionData("depositUnderlying", [
+        alchemistAddress,
+        yieldToken,
+        amount,
+        address,
+        0,
+      ]),
+    };
   }
 
   const alchemistAddress = getAlchemistAddress(chainId, depositAsset);
@@ -564,7 +615,18 @@ export const depositUnderlying = (
     alchemistAbi,
     provider.getSigner()
   );
-  return alchemist["depositUnderlying"](yieldToken, amount, address, 0);
+
+  const alchemistIface = new utils.Interface(alchemistAbi);
+
+  return {
+    to: alchemistAddress,
+    data: alchemistIface.encodeFunctionData("depositUnderlying", [
+      yieldToken,
+      amount,
+      address,
+      0,
+    ]),
+  };
 };
 
 export const depositAndBorrow = (
@@ -575,6 +637,14 @@ export const depositAndBorrow = (
   address: string,
   provider: Web3Provider
 ) => {
+  console.log("depositAndBorrow", {
+    depositAsset,
+    yieldToken,
+    depositAmount,
+    borrowAmount,
+    address,
+    provider,
+  });
   const providerChainId = provider.network.chainId;
   if (!(providerChainId in ChainIds))
     throw new Error(
@@ -584,6 +654,7 @@ export const depositAndBorrow = (
   const chainId: ChainIds = providerChainId;
 
   const alchemistAddress = getAlchemistAddress(chainId, depositAsset);
+  console.log("depositAndBorrow->alchemistAddress", alchemistAddress);
   if (!alchemistAddress)
     throw new Error(
       `depositAndBorrow(ERROR): Alchemist Address not found for chainId: ${chainId} depositAsset: ${depositAsset}`
@@ -607,5 +678,8 @@ export const depositAndBorrow = (
   );
   calls.push(iface.encodeFunctionData("mint", [borrowAmount, address]));
 
-  return alchemist["multicall"](calls);
+  return {
+    to: alchemistAddress,
+    data: iface.encodeFunctionData("multicall", [calls]),
+  };
 };

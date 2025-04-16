@@ -6,6 +6,7 @@ import SelectedTokenSelector from "@/local/SelectedTokenSelector";
 import StrategySelector from "@/local/StrategySelector";
 
 import {
+  approveToken,
   approveTokenToAlchemixContract,
   approveTokenToEnso,
   ChainIds,
@@ -13,6 +14,7 @@ import {
   Currency,
   depositAndBorrow,
   depositUnderlying,
+  getAlchemistAddress,
   getBestCurrencyForDeposit,
   getBestCurrencyForLoan,
   getTokenNameAndSymbol,
@@ -31,7 +33,7 @@ import {
 import { chainTokensMapping, Token, Tokens } from "@/utils/web3/tokenList";
 import { Web3Provider } from "@ethersproject/providers";
 import { sign } from "crypto";
-import { BigNumber, utils } from "ethers";
+import { BigNumber, Contract, ethers, utils } from "ethers";
 import { LoaderCircle } from "lucide-react";
 import { Inter } from "next/font/google";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
@@ -333,6 +335,10 @@ export default function Home() {
           inputTokenAmount,
           inputTokenDecimals
         );
+        console.log(
+          `inputToken: ${inputToken}, inputAmount: ${inputAmount}, inputTokenAmount: ${inputTokenAmount}, inputTokenDecimals: ${inputTokenDecimals}`
+        );
+
         if (inputAmount.lte(0)) return; // to prevent querrying for 0 amount
 
         let currency: Currency;
@@ -375,7 +381,7 @@ export default function Home() {
       setDepositAmount(tempDepositAmount);
     };
 
-    updateDepositValues();
+    if (inputTokenAmount !== "0") updateDepositValues();
   }, [inputToken, chainId, provider, inputTokenAmount]);
 
   useEffect(() => {
@@ -557,156 +563,188 @@ export default function Home() {
       return;
     }
 
-    // TEST:
-    if (!inputTokenIsALCXSupported && inputTokenAllowanceInsufficient) {
-      try {
-        setPending(true);
+    let transactions = [];
+    const signer = provider.getSigner();
 
+    const txnExecutorAddress = "0xf49e792da88fe083a1F2E3837b79902CD1F1C50E";
+    const txnExecutorABI = [
+      {
+        inputs: [
+          {
+            internalType: "address[]",
+            name: "targets",
+            type: "address[]",
+          },
+          {
+            internalType: "bytes[]",
+            name: "data",
+            type: "bytes[]",
+          },
+        ],
+        name: "executeBatch",
+        outputs: [],
+        stateMutability: "nonpayable",
+        type: "function",
+      },
+      {
+        anonymous: false,
+        inputs: [
+          {
+            indexed: true,
+            internalType: "address",
+            name: "target",
+            type: "address",
+          },
+          {
+            indexed: false,
+            internalType: "bytes",
+            name: "data",
+            type: "bytes",
+          },
+          {
+            indexed: false,
+            internalType: "bytes",
+            name: "response",
+            type: "bytes",
+          },
+        ],
+        name: "Executed",
+        type: "event",
+      },
+    ];
+
+    const txnExecutor = new Contract(
+      txnExecutorAddress,
+      txnExecutorABI,
+      signer
+    );
+
+    try {
+      setPending(true);
+
+      // STEP-1: Approvals (Now approving the Txn Executor contract)
+      if (!inputTokenIsALCXSupported && inputTokenAllowanceInsufficient) {
         if (!ensoRouteForInputSwap) {
           throw new Error("Input swap required before token transfer approval");
         }
-
-        const tx = await approveTokenToEnso(
-          inputToken,
-          utils.parseUnits(inputTokenAmount, inputTokenDecimals),
-          address,
-          provider,
-          ensoRouteForInputSwap
+        transactions.push(
+          approveToken(
+            inputToken,
+            ensoRouteForInputSwap?.tx.to,
+            utils.parseUnits(inputTokenAmount, inputTokenDecimals),
+            provider
+          )
         );
-        await tx.wait();
-      } catch (e) {
-        console.error(`Approve failure, ${e}`);
-      } finally {
-        setPending(false);
-        return;
-        /**
-         * TODO:
-         * An idea to make the handle flow deposit,
-         * like currently it needs multiple entry in handleDeposit
-         * for vairous approvals
-         * and then finally 3 differen transefers and accepts
-         * what if we keep a success flag which will be used at end of each
-         * step, if success = true -> continue to next step without exiting handleDeposit
-         * if fails -> return from there and restart the handleDeposit flow
-         *
-         */
       }
-    }
 
-    const amount = utils.parseUnits(depositAmount, depositDecimals);
-    if (depositAllowanceInsufficient) {
-      try {
-        setPending(true);
-        const tx = await approveTokenToAlchemixContract(
-          depositAsset,
-          amount,
-          address,
-          provider
+      if (depositAllowanceInsufficient) {
+        const alchemistAddress = getAlchemistAddress(chainId, depositAsset);
+        if (!alchemistAddress) throw new Error("Alchemist address not found");
+
+        transactions.push(
+          approveToken(
+            depositAsset,
+            alchemistAddress,
+            utils.parseUnits(depositAmount, depositDecimals),
+            provider
+          )
         );
-        await tx.wait();
-      } catch (e) {
-        console.error(`Approve failure, ${e}`);
-      } finally {
-        setPending(false);
-        return;
       }
-    }
 
-    if (!outputTokenSameAsLoanToken && loanAssetAllowanceInsufficient) {
-      try {
-        setPending(true);
-
+      if (!outputTokenSameAsLoanToken && loanAssetAllowanceInsufficient) {
         if (!ensoRouteForOutputSwap) {
           throw new Error(
             "Output swap required before token transfer approval"
           );
         }
-
-        const tx = await approveTokenToEnso(
-          loanAsset,
-          utils.parseUnits(loanAmount, loanDecimals),
-          address,
-          provider,
-          ensoRouteForOutputSwap
+        transactions.push(
+          approveToken(
+            loanAsset,
+            ensoRouteForOutputSwap?.tx.to,
+            utils.parseUnits(loanAmount, loanDecimals),
+            provider
+          )
         );
-        await tx.wait();
-      } catch (e) {
-        console.error(`Approve failure, ${e}`);
-      } finally {
-        setPending(false);
-        return;
       }
-    }
 
-    const signer = provider.getSigner();
+      // Execute all approvals in parallel
+      await Promise.all(
+        transactions.map(async (tx) => {
+          const res = await tx; // Await the transaction response
+          if (res && typeof res.wait === "function") {
+            await res.wait(); // Wait for the transaction to be mined
+          } else {
+            throw new Error("Transaction did not return a valid response");
+          }
+        })
+      );
+      transactions = []; // Reset transactions array
 
-    // STEP-1: swap the input token to ALCX supported token if not
-    if (!inputTokenIsALCXSupported && ensoRouteForInputSwap) {
-      try {
-        setPending(true);
-        const inputSwapTx = await signer.sendTransaction(
-          ensoRouteForInputSwap.tx
-        );
+      // STEP-2: Prepare batch transactions for execution
+      console.log("preparing batch transactions");
+      let batchTxs = [];
+      let targets = []; // Array to hold target addresses
+      let data = []; // Array to hold the encoded data for each target
 
-        await inputSwapTx.wait();
-        console.log("Input swap tx complete!");
-      } catch (e) {
-        console.error(`Input Swap failure, ${e}`);
-      } finally {
-        setPending(false);
+      if (!inputTokenIsALCXSupported && ensoRouteForInputSwap) {
+        batchTxs.push(ensoRouteForInputSwap.tx);
+        targets.push(ensoRouteForInputSwap.tx.to); // Add the target address
+        data.push(ensoRouteForInputSwap.tx.data); // Add the encoded data
       }
-    }
-
-    // STEP-2: ALCX Contract Interaction
-    try {
-      setPending(true);
-
-      let tx;
 
       const depositAssetKey = depositAsset === "ETH" ? "WETH" : depositAsset;
-      if (!showLoans)
-        tx = await depositUnderlying(
+      if (!showLoans) {
+        console.log("depositUnderlying");
+        const depositTx = depositUnderlying(
           depositAsset,
           mapping[currencies[depositAssetKey].addresses[chainId].toLowerCase()][
             yieldToken
           ],
-          amount,
+          utils.parseUnits(depositAmount, depositDecimals),
           address,
           provider
         );
-      else
-        tx = await depositAndBorrow(
+        batchTxs.push(depositTx);
+        targets.push(depositTx.to);
+        data.push(depositTx.data);
+      } else {
+        console.log("depositAndBorrow");
+        const borrowTx = depositAndBorrow(
           depositAsset,
           mapping[currencies[depositAssetKey].addresses[chainId].toLowerCase()][
             yieldToken
           ],
-          amount,
+          utils.parseUnits(depositAmount, depositDecimals),
           utils.parseUnits(loanAmount, loanDecimals),
           address,
           provider
         );
-      await tx.wait();
+        batchTxs.push(borrowTx);
+        targets.push(borrowTx.to);
+        data.push(borrowTx.data);
+      }
+
+      if (!outputTokenSameAsLoanToken && ensoRouteForOutputSwap) {
+        batchTxs.push(ensoRouteForOutputSwap.tx);
+        targets.push(ensoRouteForOutputSwap.tx.to); // Add the target address
+        data.push(ensoRouteForOutputSwap.tx.data); // Add the encoded data
+      }
+
+      // Execute batch transactions via Txn Executor contract
+      console.log("targets:", targets);
+      console.log("data:", data);
+
+      const gasLimit = ethers.utils.hexlify(1000000); // Set a gas limit (in this case, 1 million gas units)
+      const txn = await txnExecutor.executeBatch(targets, data, {
+        gasLimit: gasLimit,
+      });
+      await txn.wait();
+
+      console.log("Deposit process completed successfully via Txn Executor!");
     } catch (e) {
       console.error(`Deposit failure: ${e}`);
     } finally {
       setPending(false);
-    }
-
-    // STEP-3: swap the loan token to output token if needed
-    if (!outputTokenSameAsLoanToken && ensoRouteForOutputSwap) {
-      try {
-        setPending(true);
-        const outputSwapTx = await signer.sendTransaction(
-          ensoRouteForOutputSwap.tx
-        );
-
-        await outputSwapTx.wait();
-        console.log("Output swap tx complete!");
-      } catch (e) {
-        console.error(`Output Swap failure, ${e}`);
-      } finally {
-        setPending(false);
-      }
     }
   };
 
