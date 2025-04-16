@@ -38,6 +38,7 @@ import { LoaderCircle } from "lucide-react";
 import { Inter } from "next/font/google";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { BiSolidWalletAlt } from "react-icons/bi";
+import { ToastContainer, toast } from "react-toastify";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -372,6 +373,7 @@ export default function Home() {
           console.error(
             `updateDepositValues(ERROR): unable to fetchRouteForSwap error: ${error}`
           );
+          toast.error(`Unable to fetch route for swap!`);
           return;
         }
       }
@@ -508,6 +510,7 @@ export default function Home() {
         console.error(
           `fetch(ERROR): unable to fetchRouteForSwap error: ${error}`
         );
+        toast.error(`Unable to fetch route for swap!`);
         setisLoading(false);
         return;
       }
@@ -948,6 +951,7 @@ export default function Home() {
           )}
         </div>
       </div>
+      <ToastContainer />
     </main>
   );
 }
