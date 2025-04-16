@@ -744,8 +744,10 @@ export default function Home() {
       await txn.wait();
 
       console.log("Deposit process completed successfully via Txn Executor!");
+      toast.success("Deposit process completed successfully!");
     } catch (e) {
       console.error(`Deposit failure: ${e}`);
+      toast.error("Transaction failed!");
     } finally {
       setPending(false);
     }
